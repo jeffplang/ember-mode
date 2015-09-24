@@ -579,6 +579,13 @@ the corresponding source."
   (interactive)
   (ember-open-file-by-type "view"))
 
+(defun ember-component-cmd-tab ()
+  (interactive)
+  (let ((type (cadr (ember--current-file-components)))
+        (kind (caddr (ember--current-file-components))))
+    (if (string= type "component")
+        (cond ((string= kind "source") (ember-open-template))
+              ((string= kind "template") (ember-open-component))))))
 
 ;;;;;;;;;;;;;;
 ;;; Generators
