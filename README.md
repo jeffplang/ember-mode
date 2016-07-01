@@ -2,14 +2,9 @@
 
 Ember-mode speeds up navigation in EmberJS projects.
 
-    NOTE: ember-mode is a work in progress.  Although we use it internally, it will 
-    be extended in the future and it isn't fully functional yet.
-    
-    That being said, it will not destroy your code and it's nice to use.
-
 ## Usage ##
 
-Ember-mode helps in jumping and generating javascript files in an emberjs project.  It assumes an ember-cli-like folder-structure and supports both coffeescript and javascript extensions.
+Ember-mode helps in jumping and generating javascript files in an emberjs project.  It assumes an ember-cli-like folder-structure and supports both coffeescript and javascript extensions.  Experimental support for POD structures has recently been added.
 
 ### example usage ###
 
@@ -74,6 +69,14 @@ mode to link errors to files with line and column numbers. If the
 buffer that `ember serve` runs in is buried, it will also notify of
 build status via minibuffer messages.
 
+
+### working with PODs ###
+
+Ember-mode is shipped with basic support for the POD structure.  Navigation support and generators operate the same, but keep the POD structure in mind.
+
+Ember-mode will pick up `"usePods": true` when set in `.ember-cli`.  If this is set, navigation occurs assuming a POD structure.  See the installation section for more information on overriding the detection of a POD enabled project.
+
+
 ### published bindings ###
 
     C-c . f c       ember-open-controller
@@ -94,7 +97,6 @@ build status via minibuffer messages.
     C-c . g o       ember-generate-router
     C-c . g p       ember-generate-component
     C-c . g r       ember-generate-route
-    C-c . g j       ember-generate-javascript
     C-c . g t       ember-generate-template
     C-c . g v       ember-generate-view
     C-c . g x       ember-generate-mixin
@@ -108,7 +110,6 @@ build status via minibuffer messages.
     C-c . d o       ember-destroy-router
     C-c . d p       ember-destroy-component
     C-c . d r       ember-destroy-route
-    C-c . d j       ember-destroy-javascript
     C-c . d t       ember-destroy-template
     C-c . d v       ember-destroy-view
     C-c . d x       ember-destroy-mixin
@@ -149,6 +150,11 @@ customize-variable`.
   file in your ember project with the following:
 
         ((nil . ((mode . ember))))
+  
+  In order to override pod structure detection, you can use the ember-use-pods variable:
+  
+        ((nil . ((mode . ember)
+                 (ember-use-pods . t))))
 
 - alternatively, to enable ember-mode for all javascript and handlebar
   files, assuming you use javascript-mode and web-mode, you would put

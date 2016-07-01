@@ -147,11 +147,44 @@ The first item in this list is used as the 'default', used when creating files."
           (const :tag "Helm" helm)
           (const :tag "Default" default)))
 
+(defcustom ember-command "ember"
+  "Ember command"
+  :group 'ember
+  :type 'string)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; POD structure support
+
+(defvar ember-use-pods 'unset
+  "Default to not using the POD structure for now.")
+
+(defun ember--get-matcher-map-name ()
+  "Returns the name of the map for the current matcher.
+
+Returns either 'pod and 'no-pod."
+  (cond
+    ((eq ember-use-pods t) 'pod)
+    ((eq ember-use-pods nil) 'no-pod)
+    (t (if (ember--dot-ember-cli-has-pods-p)
+           'pod 'no-pod))))
+
+(defun ember--dot-ember-cli-has-pods-p ()
+  "Returns non-nil iff the .ember-cli file in the root sets
+usePods to true.  Very basic detection is performed to see if the
+line with usePods is commented out."
+  (let ((ember-cli-filename (concat (ember--current-project-root)
+                                    "/.ember-cli")))
+    (with-temp-buffer
+      (insert-file-contents ember-cli-filename)
+      (re-search-forward "^[^/]*\"usePods\".*:.*true" nil t))))
+
 ;;;;;;;;;;;;;;
 ;;; Navigation
 
-(defvar *ember--matcher-templates* nil
-  "Contains a list of all file templates
+(defvar *ember--matcher-templates* (make-hash-table)
+  "Contains a hash with lists of file templates.  The key of the
+list is the name of the map (no-pod or pod).
 
 A file template is a list containing:
 - the base type    (eg: component)
@@ -164,19 +197,21 @@ assumption.
 
 From the string base, a type can be built.")
 
-(cl-defun ember--define-matcher (base-type-regex target-kind base-location &optional (base-type base-type-regex))
-  "Adds a matcher to the end of the list of *EMBER--MATCHER-TEMPLATES*"
-  (setf *ember--matcher-templates*
-        (append *ember--matcher-templates*
+(cl-defun ember--define-matcher (map-name base-type-regex target-kind base-location &optional (base-type base-type-regex))
+  "Adds a matcher to the end of the list of *EMBER--MATCHER-TEMPLATES* for map-name"
+  (setf (gethash map-name *ember--matcher-templates*)
+        (append (gethash map-name *ember--matcher-templates*)
                 (list (list base-type-regex target-kind base-location base-type)))))
 
-(defmacro ember--define-matchers (&rest matchers)
-  `(progn ,@(cl-loop for matcher in matchers collect
-                  `(ember--define-matcher ,(car matcher) ,(cadr matcher)
-                                          (list ,@(cl-caddr matcher))
-                                          ,@(cl-cdddr matcher)))))
+(defmacro ember--define-matchers (matcher-map-name &rest matchers)
+  `(progn ,@(cl-loop for matcher in matchers
+               collect
+                 `(ember--define-matcher ',matcher-map-name
+                                         ,(car matcher) ,(cadr matcher)
+                                         (list ,@(cl-caddr matcher))
+                                         ,@(cl-cdddr matcher)))))
 
-(ember--define-matchers
+(ember--define-matchers no-pod
    ;; BEGIN contains the definition for each matcher
    ;; the first two columns are a regexp, the rest is executed as code
    ;; base-type  | target-kind | concatenation lambda body                        | override base-type
@@ -195,6 +230,32 @@ From the string base, a type can be built.")
    (".*"           "template"    ("app/templates/" :class "." :hbext)               "template")
    ;; END contains the definition of each matcher
    )
+
+(ember--define-matchers pod
+   ;; BEGIN contains the definition for each matcher
+   ;; the first two columns are a regexp, the rest is executed as code
+   ;; base-type  | target-kind | concatenation lambda body                          | override base-type
+   ("router"       ".*"          ("app/router" "." :jsext))
+   ("^route$"      "source"      ("app/" :class "/route" "." :jsext)                  "route")
+   ("model"        "source"      ("app/" :class "/model" "." :jsext))
+   ("view"         "source"      ("app/" :class "/view" "." :jsext))
+   ("controller"   "source"      ("app/" :class "/controller" "." :jsext))
+   ("service"      "source"      ("app/" :class "/service" "." :jsext))
+   ("component"    "source"      ("app/components/" :class "/component" "." :jsext))
+   ("mixin"        "source"      ("app/mixins/" :class "." :jsext))
+   ("initializer"  "source"      ("app/initializers/" :class "." :jsext))
+   ("util"         "source"      ("app/utils/" :class "." :jsext))
+   ("service"      "source"      ("app/services/" :class "." :jsext))
+   ("component"    "template"    ("app/components/" :class "/template" "." :hbext))
+   ("template"     "source"      ("app/" :class "/template" "." :hbext))
+   (".*"           "template"    ("app/" :class "/template" "." :hbext)               "template")
+   ;; END contains the definition of each matcher
+   )
+
+(defun ember--current-matcher-templates ()
+  "Returns the contents of the matcher templates given the current
+POD setting."
+  (gethash (ember--get-matcher-map-name) *ember--matcher-templates*))
 
 (defun ember--matcher-partial-fill (matcher-template &rest options)
   "Fills in the parts of MATCHER-TEMPLATE which could be filled in
@@ -232,7 +293,8 @@ OPTIONS should be an alist containing the keywords :CLASS and
   "Returns the matcher templates which match BASE-TYPE and
 TARGET-KIND in the order in which the matchers have been
 defined."
-  (cl-loop for (base-type-regexp target-kind-regexp matcher-template) in *ember--matcher-templates*
+  (cl-loop for (base-type-regexp target-kind-regexp matcher-template)
+        in (ember--current-matcher-templates)
         if (and (string-match base-type-regexp (or base-type ""))
                 (string-match target-kind-regexp (or target-kind "")))
         collect matcher-template))
@@ -240,7 +302,7 @@ defined."
 (defun ember--matchers-for (base-type target-kind)
   "Similar to ember--matcher-templates-for, but returning the the
 whole matcher"
-  (cl-loop for matcher in *ember--matcher-templates*
+  (cl-loop for matcher in (ember--current-matcher-templates)
         for (base-type-regexp target-kind-regexp matcher-template) = matcher
         if (and (string-match base-type-regexp (or base-type ""))
                 (string-match target-kind-regexp (or target-kind "")))
@@ -345,7 +407,7 @@ Sources are specified in ember by a few orthogonal factors:
     (when templates
       (mapcar #'ember--matcher-relative-path
               (ember--matcher-template-map-extensions
-               (ember--matcher-partial-fill (first templates)
+               (ember--matcher-partial-fill (cl-first templates)
                                             :class base-class
                                             :base-type base-type
                                             :target-kind target-kind))))))
@@ -368,14 +430,14 @@ The components are defined in `ember--relative-ember-source-path'.  This functio
 returns the base-class, the base-type and the target-kind of the current
 file."
   (let ((components-and-matcher
-         (cl-loop for matcher in *ember--matcher-templates*
+         (cl-loop for matcher in (ember--current-matcher-templates)
                for components = (ember--matcher-matches-file-p matcher file)
                if components
                return (list components matcher))))
     (when components-and-matcher
       (cl-destructuring-bind (components matcher) components-and-matcher
         (let ((base-class (cl-getf components :class))
-              (base-type  (fourth matcher))
+              (base-type  (cl-fourth matcher))
               (target-kind (cond
                             ((cl-find (cl-getf components :jsext) ember-script-file-types :test #'equal)
                              "source")
@@ -421,7 +483,7 @@ Kind should be one of \"template\" or \"source\"."
 
 (defun ember--get-matcher-template (matcher)
   "Returns the matcher template for MATCHER."
-  (third matcher))
+  (cl-third matcher))
 
 (defmacro ember--appendf (list-location appended-list)
   "Appends APPENDED-LIST to the list on LIST-LOCATION and stores
@@ -505,13 +567,13 @@ requests the user if the file should be created."
          (append (ember--relative-ember-source-path base-class base-type target-kind)
                  (ember--relative-ember-source-path (ember--pluralize-noun base-class) base-type target-kind)
                  (ember--relative-ember-source-path (ember--singularize-noun base-class) base-type target-kind))))
-    (block found-file
+    (cl-block found-file
       (cl-loop for relative-file in file-list
             for absolute-file = (concat ember-root relative-file)
             if (file-exists-p absolute-file)
             do
                (find-file absolute-file)
-               (return-from found-file absolute-file))
+               (cl-return-from found-file absolute-file))
       (when (string= target-kind "template")
         (setf base-type "template"))
       (ember--select-file-by-type-and-kind "Not found, alternatives: " base-type target-kind))))
@@ -600,7 +662,7 @@ the corresponding source."
   (interactive (ember--interactive-generator-options))
   (let ((default-directory (ember--current-project-root)))
     (let ((response
-           (shell-command-to-string (concat "ember generate " generator " " kind " " options))))
+           (shell-command-to-string (concat ember-command " generate " generator " " kind " " options))))
       (message response)
       ;; open the first file that was created
       (find-file (concat default-directory "/"
@@ -702,7 +764,7 @@ found by `ember--current-file-components'."
                  (kind (or supplied-kind (read-string (concat (if destroy-p "Destroying" "Generating") " "
                                                               generator " for kind: ")
                                                       current-base-class)))
-                 (options (read-string "Options: " "")))
+                 (options (read-string "Options: " )))
             (list generator kind options)))
       ;; figure out which values we should return
       (let ((result (list new-options)))
@@ -950,7 +1012,6 @@ For example, if you have a project named foo, the paths look like
 (define-key ember-command-prefix (kbd "g m") #'ember-generate-model)
 (define-key ember-command-prefix (kbd "g r") #'ember-generate-route)
 (define-key ember-command-prefix (kbd "g t") #'ember-generate-template)
-(define-key ember-command-prefix (kbd "g j") #'ember-generate-javascript)
 (define-key ember-command-prefix (kbd "g v") #'ember-generate-view)
 (define-key ember-command-prefix (kbd "g x") #'ember-generate-mixin)
 (define-key ember-command-prefix (kbd "g i") #'ember-generate-initializer)
@@ -963,7 +1024,6 @@ For example, if you have a project named foo, the paths look like
 (define-key ember-command-prefix (kbd "d m") #'ember-destroy-model)
 (define-key ember-command-prefix (kbd "d r") #'ember-destroy-route)
 (define-key ember-command-prefix (kbd "d t") #'ember-destroy-template)
-(define-key ember-command-prefix (kbd "d j") #'ember-destroy-javascript)
 (define-key ember-command-prefix (kbd "d v") #'ember-destroy-view)
 (define-key ember-command-prefix (kbd "d x") #'ember-destroy-mixin)
 (define-key ember-command-prefix (kbd "d i") #'ember-destroy-initializer)
